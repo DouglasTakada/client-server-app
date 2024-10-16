@@ -1,8 +1,8 @@
 import socket
+import threading
 
 def receive_file(conn):
     file = conn.recv(1024).decode() # grab filename
-    conn.send("filename".encode()) # send acknowledgement we got filename
     print("received filename: "+ file)
     with open(file, 'w') as f: # make and open the filename in server folder
         data = conn.recv(1024).decode()
@@ -21,8 +21,6 @@ def send_file(conn):
             # send file, acutal filename then wait for filename back
             conn.send("filename".encode())
             conn.send(filename.encode())
-            while conn.recv(1024).decode() != "filename":
-                pass # wait for filename 
             print("filename successfully received from server\nSending file data...")
             while data: 
                 conn.send(str(data).encode()) 
@@ -31,6 +29,30 @@ def send_file(conn):
             fi.close()
     except IOError: 
         print('You entered an invalid filename!\nPlease enter a valid name')
+
+def receive(conn,stop):
+    # receive data stream. it won't accept data packet greater than 1024 bytes
+    while not stop.is_set():
+        data = conn.recv(1024).decode()
+        if str(data) == "filename": # receive filename 
+            receive_file(conn)
+        elif str(data) == "bye":
+            conn.send("later gator!".encode())
+            stop.set()
+            break
+        else:
+            print("from connected user: " + str(data))
+
+def send(conn,stop):
+    message = ""
+    while message.lower().strip() != 'bye':
+        message = input(" -> ")  # take input
+        if message.lower().strip() == 'send file':
+            send_file(conn)
+            message = ""
+            continue
+        conn.send(message.encode())  # send message
+    stop.set()
 
 def server_program():
     # get the hostname
@@ -45,25 +67,19 @@ def server_program():
     server_socket.listen(2)
     conn, address = server_socket.accept()  # accept new connection
     print("Connection from: " + str(address))
-    while True:
-        # receive data stream. it won't accept data packet greater than 1024 bytes
-        data = conn.recv(1024).decode()
-        if not data:
-            # if data is not received break
-            break
-        if str(data) == "filename": # receive filename 
-            receive_file(conn)
 
-        print("from connected user: " + str(data))
-        data = input(' -> ')
-        if data.lower().strip() == 'send file':
-            send_file(conn)
-            data = ""
-            continue
-        conn.send(data.encode())  # send data to the client
+            # Create two threads: one for sending and one for receiving
+    stop_event = threading.Event()
+    send_thread = threading.Thread(target=send, args=(conn,stop_event,))
+    receive_thread = threading.Thread(target=receive, args=(conn,stop_event,))
+
+    send_thread.start()
+    receive_thread.start()
+
+    send_thread.join()
+    receive_thread.join()
 
     conn.close()  # close the connection
-
 
 if __name__ == '__main__':
     server_program()
